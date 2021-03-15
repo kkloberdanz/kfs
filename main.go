@@ -48,17 +48,44 @@ func get_output_path(input_filename string) string {
 	return output_path
 }
 
-func store_file(filename string) {
-	fmt.Printf("storing: %s\n", filename)
+func move_file(src string, dst string) error {
+	cmd := exec.Command("mv", src, dst)
+	err := cmd.Run()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func hash_file(filename string) (string, error) {
 	output, err := exec.Command("sha256sum", filename).Output()
 	if err != nil {
-		fmt.Printf("failed to hash '%s': %s\n", filename, err)
-		return
+		return "", fmt.Errorf("failed to hash '%s': %s", filename, err)
 	}
 
 	output_str := string(output)
 	hash := strings.Fields(output_str)[0]
 	fmt.Printf("hash = %s\n", hash)
+	return hash, nil
+}
+
+func store_file(filename string) {
+	defer os.Remove(filename)
+	fmt.Printf("storing: %s\n", filename)
+	hash, err := hash_file(filename)
+	if err != nil {
+		fmt.Printf("failed to hash file: %s\n", err)
+	}
+	new_path := filepath.Join(KFS_STORAGE_PATH, hash)
+	move_file(filename, new_path)
+
+	/*
+	 * TODO: add a record to the sqlite db with the following metadata
+	 * |storage root|uuid|path|filename|hash|hash algo (sha256)|extension
+	 * |file type|permissions|access time|modify time|change time|creation time
+	 */
+
+	// TODO: compress and encrypt file
 }
 
 /**
