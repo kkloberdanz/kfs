@@ -61,7 +61,7 @@ func move_file(src string, dst string) error {
 }
 
 func hash_file(filename string) (string, error) {
-	output, err := exec.Command("sha256sum", filename).Output()
+	output, err := exec.Command("b2sum", filename).Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to hash '%s': %s", filename, err)
 	}
@@ -80,15 +80,20 @@ func store_file(filename string) {
 		fmt.Printf("failed to hash file: %s\n", err)
 	}
 	new_path := filepath.Join(KFS_STORAGE_PATH, hash)
+
+	// TODO: acquire file lock
 	move_file(filename, new_path)
+	// TODO: release file lock
 
 	/*
 	 * TODO: add a record to the sqlite db with the following metadata
-	 * |storage root|uuid|path|filename|hash|hash algo (sha256)|extension
+	 * |storage root|uuid|path|filename|hash|hash algo (blake2)|extension
 	 * |file type|permissions|access time|modify time|change time|creation time
 	 */
 
 	// TODO: compress and encrypt file
+
+	// TODO: handle errors
 }
 
 /**
@@ -119,7 +124,7 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	}
 	defer outf.Close()
 	io.Copy(outf, file)
-	go store_file(output_path)
+	store_file(output_path)
 }
 
 func initialize_db() {
