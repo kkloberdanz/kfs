@@ -18,6 +18,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -27,6 +28,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	_ "github.com/mattn/go-sqlite3"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -34,6 +36,7 @@ const (
 	KFS_VERSION      = "0.0.1"
 	KFS_STORAGE_PATH = "/home/kyle/.kfs/storage"
 	KFS_STAGING_PATH = "/home/kyle/.kfs/staging"
+	KFS_DB_PATH      = "/home/kyle/.kfs/db/db.sqlite3"
 )
 
 func index(writer http.ResponseWriter, request *http.Request) {
@@ -119,9 +122,32 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	go store_file(output_path)
 }
 
+func initialize_db() {
+	db, err := sql.Open("sqlite3", KFS_DB_PATH)
+	if err != nil {
+		fmt.Printf("failed to open database: %s\n", err)
+		return
+	}
+
+	// TODO: create the actual schema here
+	schema := `
+	CREATE TABLE IF NOT EXISTS items(
+		Id TEXT NOT NULL PRIMARY KEY,
+		Name TEXT,
+		Phone TEXT,
+		InsertedDatetime DATETIME
+	);
+	`
+	_, err = db.Exec(schema)
+	if err != nil {
+		panic(err)
+	}
+}
+
 func main() {
 	fmt.Println("KFS -- Kyle's File Storage")
 	fmt.Printf("version: %s\n", KFS_VERSION)
+	initialize_db()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", index)
 	mux.HandleFunc("/upload", handle_upload)
