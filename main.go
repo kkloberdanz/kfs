@@ -51,8 +51,8 @@ func get_output_path(input_filename string) string {
 	return output_path
 }
 
-func move_file(src string, dst string) error {
-	cmd := exec.Command("mv", src, dst)
+func copy_file(src string, dst string) error {
+	cmd := exec.Command("cp", src, dst)
 	err := cmd.Run()
 	if err != nil {
 		return err
@@ -75,21 +75,10 @@ func hash_file(filename string) (string, error) {
 func store_file(filename string, hash string) {
 	defer os.Remove(filename)
 	fmt.Printf("storing: %s\n", filename)
+	copy_file(filename, KFS_STORAGE_PATH)
+	fmt.Printf("stored: '%s' to '%s'\n", filename, KFS_STORAGE_PATH)
 
-	// TODO: acquire file lock
-	move_file(filename, KFS_STORAGE_PATH)
-	// TODO: release file lock
-
-	fmt.Printf("stored: '%s' to '%s'", filename, KFS_STORAGE_PATH)
-	/*
-	 * TODO: add a record to the sqlite db with the following metadata
-	 * |storage root|uuid|path|filename|hash|hash algo (blake2b)|extension
-	 * |file type|permissions|access time|modify time|change time|creation time
-	 */
-
-	// TODO: compress and encrypt file
-
-	// TODO: handle errors
+	// TODO: communicate errors to error queue
 }
 
 /**
@@ -109,7 +98,7 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	//         localhost:8080/upload
 	// }
 	fmt.Println("handling upload")
-
+	// TODO: lookup hash in database, if it already exists, then do nothing
 	// TODO: request storage locations
 
 	file, header, err := request.FormFile("file")
@@ -133,6 +122,13 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 		size,
 		client_hash,
 	)
+
+	/*
+	 * TODO: add a record to the sqlite db with the following metadata
+	 * |storage root|uuid|path|filename|hash|hash algo (blake2b)|extension
+	 * |file type|permissions|access time|modify time|change time|creation time
+	 */
+
 	output_path := get_output_path(header.Filename)
 	outf, err := os.Create(output_path)
 	if err != nil {
@@ -160,7 +156,7 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	hash_filename := filepath.Join(KFS_STAGING_PATH, hash+".blake2b")
-	move_file(output_path, hash_filename)
+	os.Rename(output_path, hash_filename)
 	go store_file(hash_filename, hash)
 	writer.WriteHeader(http.StatusOK)
 	fmt.Fprintf(writer, "OK\n")
