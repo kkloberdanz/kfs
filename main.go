@@ -165,22 +165,36 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 func initialize_db() {
 	db, err := sql.Open("sqlite3", KFS_DB_PATH)
 	if err != nil {
-		fmt.Printf("failed to open database: %s\n", err)
-		return
+		panic(err)
 	}
 
 	// TODO: create the actual schema here
-	schema := `
-	CREATE TABLE IF NOT EXISTS items(
-		Id TEXT NOT NULL PRIMARY KEY,
-		Name TEXT,
-		Phone TEXT,
-		InsertedDatetime DATETIME
-	);
-	`
-	_, err = db.Exec(schema)
-	if err != nil {
-		panic(err)
+	schemas := []string{
+		`
+		CREATE TABLE IF NOT EXISTS files(
+			hash TEXT,
+			hash_algo TEXT,
+			storage_root TEXT,
+			path TEXT,
+			filename TEXT,
+			extension TEXT
+		);
+		`,
+
+		`
+		CREATE TABLE IF NOT EXISTS disks(
+			root TEXT,
+			capacity INTEGER,
+			used INTEGER
+		);
+		`,
+	}
+
+	for _, schema := range schemas {
+		_, err = db.Exec(schema)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 
