@@ -75,13 +75,12 @@ func hash_file(filename string) (string, error) {
 func store_file(filename string, hash string) {
 	defer os.Remove(filename)
 	fmt.Printf("storing: %s\n", filename)
-	new_path := filepath.Join(KFS_STORAGE_PATH, hash+".blake2b")
 
 	// TODO: acquire file lock
-	move_file(filename, new_path)
+	move_file(filename, KFS_STORAGE_PATH)
 	// TODO: release file lock
 
-	fmt.Printf("stored: '%s' to '%s'", filename, new_path)
+	fmt.Printf("stored: '%s' to '%s'", filename, KFS_STORAGE_PATH)
 	/*
 	 * TODO: add a record to the sqlite db with the following metadata
 	 * |storage root|uuid|path|filename|hash|hash algo (blake2b)|extension
@@ -110,6 +109,9 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	//         localhost:8080/upload
 	// }
 	fmt.Println("handling upload")
+
+	// TODO: request storage locations
+
 	file, header, err := request.FormFile("file")
 	if err != nil {
 		http.Error(
@@ -156,7 +158,10 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusNotAcceptable)
 		return
 	}
-	go store_file(output_path, hash)
+
+	hash_filename := filepath.Join(KFS_STAGING_PATH, hash+".blake2b")
+	move_file(output_path, hash_filename)
+	go store_file(hash_filename, hash)
 	writer.WriteHeader(http.StatusOK)
 	fmt.Fprintf(writer, "OK\n")
 }
