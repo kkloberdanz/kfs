@@ -72,22 +72,19 @@ func hash_file(filename string) (string, error) {
 	return hash, nil
 }
 
-func store_file(filename string) {
+func store_file(filename string, hash string) {
 	defer os.Remove(filename)
 	fmt.Printf("storing: %s\n", filename)
-	hash, err := hash_file(filename)
-	if err != nil {
-		fmt.Printf("failed to hash file: %s\n", err)
-	}
-	new_path := filepath.Join(KFS_STORAGE_PATH, hash)
+	new_path := filepath.Join(KFS_STORAGE_PATH, hash+".blake2b")
 
 	// TODO: acquire file lock
 	move_file(filename, new_path)
 	// TODO: release file lock
 
+	fmt.Printf("stored: '%s' to '%s'", filename, new_path)
 	/*
 	 * TODO: add a record to the sqlite db with the following metadata
-	 * |storage root|uuid|path|filename|hash|hash algo (blake2)|extension
+	 * |storage root|uuid|path|filename|hash|hash algo (blake2b)|extension
 	 * |file type|permissions|access time|modify time|change time|creation time
 	 */
 
@@ -103,7 +100,16 @@ func store_file(filename string) {
  */
 func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	// you can upload file with:
-	// curl -X POST -F "file=@src/main.go" localhost:8080/upload
+	// function kfs_upload()
+	// {
+	//     curl \
+	//         -X POST \
+	//         -F "file=@$1" \
+	//         -F "hash=`b2sum $1 | awk '{ print $1 }'`" \
+	//         -F "path=`pwd`" \
+	//         localhost:8080/upload
+	// }
+	fmt.Println("handling upload")
 	file, header, err := request.FormFile("file")
 	if err != nil {
 		http.Error(
@@ -115,7 +121,16 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	defer file.Close()
-	fmt.Printf("got file '%s'\n", header.Filename)
+	client_hash := request.FormValue("hash")
+	size := header.Size
+	client_path := request.FormValue("path")
+	fmt.Printf(
+		"got file '%s/%s', size: %d, blake2b hash: %s\n",
+		client_path,
+		header.Filename,
+		size,
+		client_hash,
+	)
 	output_path := get_output_path(header.Filename)
 	outf, err := os.Create(output_path)
 	if err != nil {
@@ -124,7 +139,26 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	}
 	defer outf.Close()
 	io.Copy(outf, file)
-	store_file(output_path)
+
+	hash, err := hash_file(output_path)
+	if err != nil {
+		fmt.Printf("failed to hash file: %s\n", err)
+		writer.WriteHeader(http.StatusNotAcceptable)
+		return
+	}
+	if hash != client_hash {
+		fmt.Fprintf(
+			writer,
+			"hashes do not match: you gave me: %s, but I calculated: %s\n",
+			client_hash,
+			hash,
+		)
+		writer.WriteHeader(http.StatusNotAcceptable)
+		return
+	}
+	go store_file(output_path, hash)
+	writer.WriteHeader(http.StatusOK)
+	fmt.Fprintf(writer, "OK\n")
 }
 
 func initialize_db() {
