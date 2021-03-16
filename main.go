@@ -39,6 +39,10 @@ const (
 	KFS_DB_PATH      = "/home/kyle/.kfs/db/db.sqlite3"
 )
 
+var (
+	db *sql.DB
+)
+
 func index(writer http.ResponseWriter, request *http.Request) {
 	fmt.Fprintf(writer, "KFS version: %s", KFS_VERSION)
 }
@@ -99,7 +103,6 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	// }
 	fmt.Println("handling upload")
 	// TODO: lookup hash in database, if it already exists, then do nothing
-	// TODO: request storage locations
 
 	file, header, err := request.FormFile("file")
 	if err != nil {
@@ -114,6 +117,10 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	defer file.Close()
 	client_hash := request.FormValue("hash")
 	size := header.Size
+	// TODO: request storage locations
+	staging, storage, err := db_alloc_storage(size)
+	fmt.Printf("staging: %s, storage: %s\n", staging, storage)
+
 	client_path := request.FormValue("path")
 	fmt.Printf(
 		"got file '%s/%s', size: %d, blake2b hash: %s\n",
@@ -162,7 +169,40 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	fmt.Fprintf(writer, "OK\n")
 }
 
-func initialize_db() {
+func db_alloc_storage(size int64) (string, []string, error) {
+	db, err := sql.Open("sqlite3", KFS_DB_PATH)
+	if err != nil {
+		panic(err)
+	}
+	query := `
+		select root, capacity - used
+		from disks
+		where capacity - used > ?
+		order by 2 ASC;`
+	rows, err := db.Query(query, size)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	var (
+		root     string
+		capacity int64
+	)
+
+	// TODO: return preferred staging directory and list of storage directories
+	for rows.Next() {
+		if err := rows.Scan(&root, &capacity); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("root: %s capacity: %d\n", root, capacity)
+		break
+	}
+
+	return "", []string{""}, nil
+}
+
+func db_init() {
 	db, err := sql.Open("sqlite3", KFS_DB_PATH)
 	if err != nil {
 		panic(err)
@@ -196,12 +236,24 @@ func initialize_db() {
 			panic(err)
 		}
 	}
+
+	disk_insert := `
+		INSERT OR REPLACE INTO disks(
+			root,
+			capacity,
+			used
+		) values('/home/kyle/.kfs/storage', 1000000000, 123456)
+	`
+	_, err = db.Exec(disk_insert)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func main() {
 	fmt.Println("KFS -- Kyle's File Storage")
 	fmt.Printf("version: %s\n", KFS_VERSION)
-	initialize_db()
+	db_init()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", index)
 	mux.HandleFunc("/upload", handle_upload)
