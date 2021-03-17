@@ -102,7 +102,6 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	//         localhost:8080/upload
 	// }
 	fmt.Println("handling upload")
-	// TODO: lookup hash in database, if it already exists, then do nothing
 
 	file, header, err := request.FormFile("file")
 	if err != nil {
@@ -129,6 +128,13 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 		size,
 		client_hash,
 	)
+	// TODO: lookup hash in database, if it already exists, then do nothing
+	err = db_add_file(header.Filename, client_hash)
+	if err != nil {
+		// file already exists
+		writer.WriteHeader(http.StatusOK)
+		fmt.Fprintf(writer, "OK\n")
+	}
 
 	/*
 	 * TODO: add a record to the sqlite db with the following metadata
@@ -167,6 +173,14 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	go store_file(hash_filename, hash)
 	writer.WriteHeader(http.StatusOK)
 	fmt.Fprintf(writer, "OK\n")
+}
+
+func db_add_file(filename string, file_hash string) error {
+	// TODO: mutext lock
+	// check if file already exists
+	// if file exists, then caller should return early,
+	// else, insert new record
+	return nil
 }
 
 func db_alloc_storage(size int64) (string, []string, error) {
