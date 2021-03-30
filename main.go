@@ -22,11 +22,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
 	uuid "github.com/satori/go.uuid"
@@ -41,8 +43,13 @@ const (
 )
 
 var (
-	db *sql.DB
+	mutex = &sync.Mutex{}
 )
+
+type DiskInfo struct {
+	Root           string
+	BytesAvailable uint64
+}
 
 func index(writer http.ResponseWriter, request *http.Request) {
 	fmt.Fprintf(writer, "KFS version: %s", KFS_VERSION)
@@ -185,15 +192,17 @@ func db_alloc_storage(size int64) (string, []string, error) {
 	 * |storage root|uuid|path|filename|hash|hash algo (blake2b)|extension
 	 * |file type|permissions|access time|modify time|change time|creation time
 	 */
+	mutex.Lock()
+	defer mutex.Unlock()
 
 	db, err := sql.Open("sqlite3", KFS_DB_PATH)
 	if err != nil {
 		panic(err)
 	}
 	query := `
-		select root, capacity - used
+		select root, available
 		from disks
-		where capacity - used > ?
+		where available > ?
 		order by 2 ASC;`
 	rows, err := db.Query(query, size)
 	if err != nil {
@@ -201,19 +210,26 @@ func db_alloc_storage(size int64) (string, []string, error) {
 	}
 	defer rows.Close()
 
-	var (
-		root     string
-		capacity int64
-	)
+	var disk_info []DiskInfo
 
 	// TODO: return preferred staging directory and list of storage directories
 	for rows.Next() {
-		if err := rows.Scan(&root, &capacity); err != nil {
+		var (
+			root      string
+			available uint64
+		)
+		if err := rows.Scan(&root, &available); err != nil {
 			log.Fatal(err)
 		}
-		log.Printf("root: %s capacity: %d\n", root, capacity)
+		disk_info = append(disk_info, DiskInfo{root, available})
 		break
 	}
+	selected_disk := disk_info[rand.Int()%len(disk_info)]
+	log.Printf(
+		"root: %s bytes available: %d\n",
+		selected_disk.Root,
+		selected_disk.BytesAvailable,
+	)
 
 	return "", []string{""}, nil
 }
