@@ -30,6 +30,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	uuid "github.com/satori/go.uuid"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -129,18 +130,11 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 		client_hash,
 	)
 	// TODO: lookup hash in database, if it already exists, then do nothing
-	err = db_add_file(header.Filename, client_hash)
 	if err != nil {
 		// file already exists
 		writer.WriteHeader(http.StatusOK)
 		fmt.Fprintf(writer, "OK\n")
 	}
-
-	/*
-	 * TODO: add a record to the sqlite db with the following metadata
-	 * |storage root|uuid|path|filename|hash|hash algo (blake2b)|extension
-	 * |file type|permissions|access time|modify time|change time|creation time
-	 */
 
 	output_path := get_output_path(header.Filename)
 	outf, err := os.Create(output_path)
@@ -175,15 +169,23 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	fmt.Fprintf(writer, "OK\n")
 }
 
-func db_add_file(filename string, file_hash string) error {
-	// TODO: mutext lock
-	// check if file already exists
-	// if file exists, then caller should return early,
-	// else, insert new record
-	return nil
+func get_disk_space(path string) uint64 {
+	var stat unix.Statfs_t
+
+	unix.Statfs(path, &stat)
+
+	// Available blocks * size per block = available space in bytes
+	available_space := stat.Bavail * uint64(stat.Bsize)
+	return available_space
 }
 
 func db_alloc_storage(size int64) (string, []string, error) {
+	/*
+	 * TODO: add a record to the sqlite db with the following metadata
+	 * |storage root|uuid|path|filename|hash|hash algo (blake2b)|extension
+	 * |file type|permissions|access time|modify time|change time|creation time
+	 */
+
 	db, err := sql.Open("sqlite3", KFS_DB_PATH)
 	if err != nil {
 		panic(err)
@@ -237,9 +239,8 @@ func db_init() {
 
 		`
 		CREATE TABLE IF NOT EXISTS disks(
-			root TEXT,
-			capacity INTEGER,
-			used INTEGER
+			root TEXT NOT NULL PRIMARY KEY,
+			available INTEGER
 		);
 		`,
 	}
@@ -251,16 +252,26 @@ func db_init() {
 		}
 	}
 
+	// TODO: allow user to configure disk locations
+	disks := []string{
+		"/mnt/disk1",
+		"/mnt/disk2",
+		"/mnt/disk3",
+		"/mnt/disk4",
+	}
+
 	disk_insert := `
 		INSERT OR REPLACE INTO disks(
 			root,
-			capacity,
-			used
-		) values('/home/kyle/.kfs/storage', 1000000000, 123456)
+			available
+		) values(?, ?)
 	`
-	_, err = db.Exec(disk_insert)
-	if err != nil {
-		panic(err)
+	for _, disk := range disks {
+		space := get_disk_space(disk)
+		_, err = db.Exec(disk_insert, disk, space)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 
