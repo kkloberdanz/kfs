@@ -37,7 +37,6 @@ func index(writer http.ResponseWriter, request *http.Request, p httprouter.Param
  */
 func handle_exists(writer http.ResponseWriter, request *http.Request, p httprouter.Params) {
 	hash := p.ByName("hash")
-	fmt.Printf("****CLIENT HASH: '%s'\n", hash)
 	if db_has_hash(hash) {
 		fmt.Fprintf(writer, "yes")
 	} else {
