@@ -90,8 +90,6 @@ func archive_file(staging_path string, storage_paths []string, hash_filename str
 	var wg sync.WaitGroup
 	for _, storage_path := range storage_paths {
 		fmt.Printf("path: %s\n", storage_path)
-		// TODO: when all store_file goroutines have finished, remove
-		//       the file from the staging directory
 		wg.Add(1)
 		go func(storage_path string, hash_filename string, hash string) {
 			defer wg.Done()
@@ -103,6 +101,7 @@ func archive_file(staging_path string, storage_paths []string, hash_filename str
 
 	// TODO: check error
 	os.Remove(hash_filename)
+	log.Printf("removed file: %s", hash_filename)
 }
 
 /**
@@ -136,13 +135,17 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	defer file.Close()
 	client_hash := request.FormValue("hash")
 	size := header.Size
-	// TODO: request storage locations
-	staging_path, storage_paths, err := db_alloc_storage(client_hash, size)
+	skip, staging_path, storage_paths, err := db_alloc_storage(client_hash, size)
 	if err != nil {
 		msg := fmt.Sprintf("could not store '%s': %v", header.Filename, err)
 		log.Println(msg)
 		writer.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(writer, "%s\n", msg)
+		return
+	}
+	if skip {
+		log.Printf("skipping, already have hash: %s", client_hash)
+		fmt.Fprintf(writer, "OK\n")
 		return
 	}
 	fmt.Printf("staging: %s, storage: %s\n", staging_path, storage_paths)
@@ -155,7 +158,6 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 		size,
 		client_hash,
 	)
-	// TODO: lookup hash in database, if it already exists, then do nothing
 
 	output_path := get_output_path(staging_path, header.Filename)
 	outf, err := os.Create(output_path)
@@ -220,8 +222,20 @@ func db_add_file_records(hash string, storage_dirs []string) {
 	}
 }
 
-func db_alloc_storage(hash string, size int64) (string, []string, error) {
-	// TODO: if hash already exists, then don't do anything
+func db_has_hash(hash string) bool {
+	var n_records int64
+	query := `select count(*) from files where hash = ?`
+	err := db.QueryRow(query, hash).Scan(&n_records)
+	if err != nil {
+		new_err := fmt.Errorf("could not select from 'files' table: %v", err)
+		log.Println(new_err)
+		return false
+	}
+	return n_records > 0
+}
+
+func db_alloc_storage(hash string, size int64) (bool, string, []string, error) {
+	// TODO: store file metadata in table
 
 	/*
 	 * TODO: add a record to the sqlite db with the following metadata
@@ -231,16 +245,23 @@ func db_alloc_storage(hash string, size int64) (string, []string, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
+	skip := false
+
+	// if hash already exists, then don't do anything
+	if db_has_hash(hash) {
+		skip = true
+		return skip, "", []string{""}, nil
+	}
+
 	query := `
 		select root
 		from disks
 		where available > ?
 	`
-	fmt.Printf("size: %d\n", size)
 	rows, err := db.Query(query, 2*size)
 	if err != nil {
 		new_err := fmt.Errorf("could not query for available disk: %v", err)
-		return "", []string{""}, new_err
+		return skip, "", []string{""}, new_err
 	}
 	defer rows.Close()
 
@@ -257,7 +278,7 @@ func db_alloc_storage(hash string, size int64) (string, []string, error) {
 		new_err := fmt.Errorf(
 			"not enough disks to meet redundancy requirements",
 		)
-		return "", []string{""}, new_err
+		return skip, "", []string{""}, new_err
 	}
 	rand.Shuffle(len(disks), func(i, j int) {
 		disks[i], disks[j] = disks[j], disks[i]
@@ -284,7 +305,7 @@ func db_alloc_storage(hash string, size int64) (string, []string, error) {
 		full_path := fmt.Sprintf("%s/.kfs/storage/", dir)
 		storage_paths = append(storage_paths, full_path)
 	}
-	return staging_path, storage_paths, nil
+	return skip, staging_path, storage_paths, nil
 }
 
 func db_init() {
