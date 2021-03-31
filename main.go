@@ -47,7 +47,7 @@ var (
 )
 
 func index(writer http.ResponseWriter, request *http.Request) {
-	fmt.Fprintf(writer, "KFS version: %s", KFS_VERSION)
+	fmt.Fprintf(writer, "KFS version: %s\n", KFS_VERSION)
 }
 
 func get_output_path(staging_path string, input_filename string) string {
@@ -102,6 +102,18 @@ func archive_file(staging_path string, storage_paths []string, hash_filename str
 	// TODO: check error
 	os.Remove(hash_filename)
 	log.Printf("removed file: %s", hash_filename)
+}
+
+/**
+ * Check if the hash already exists on the server
+ */
+func handle_exists(writer http.ResponseWriter, request *http.Request) {
+	client_hash := request.FormValue("hash")
+	if db_has_hash(client_hash) {
+		fmt.Fprintf(writer, "yes\n")
+	} else {
+		fmt.Fprintf(writer, "no\n")
+	}
 }
 
 /**
@@ -373,6 +385,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", index)
 	mux.HandleFunc("/upload", handle_upload)
+	mux.HandleFunc("/exists", handle_exists)
 	server := &http.Server{
 		Addr:    "0.0.0.0:8080",
 		Handler: mux,
