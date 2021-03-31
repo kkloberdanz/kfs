@@ -26,6 +26,10 @@ import (
 	"path/filepath"
 )
 
+func index(writer http.ResponseWriter, request *http.Request) {
+	fmt.Fprintf(writer, "KFS version: %s\n", KFS_VERSION)
+}
+
 /**
  * Check if the hash already exists on the server
  */
@@ -36,10 +40,6 @@ func handle_exists(writer http.ResponseWriter, request *http.Request) {
 	} else {
 		fmt.Fprintf(writer, "no\n")
 	}
-}
-
-func index(writer http.ResponseWriter, request *http.Request) {
-	fmt.Fprintf(writer, "KFS version: %s\n", KFS_VERSION)
 }
 
 /**
@@ -108,7 +108,7 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 
 	hash, err := hash_file(output_path)
 	if err != nil {
-		fmt.Printf("failed to hash file: %s\n", err)
+		log.Printf("failed to hash file: %s\n", err)
 		writer.WriteHeader(http.StatusNotAcceptable)
 		return
 	}
