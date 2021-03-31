@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"sync"
 
+	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/sys/unix"
 )
 
