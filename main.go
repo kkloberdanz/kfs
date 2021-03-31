@@ -36,30 +36,24 @@ import (
 )
 
 const (
-	KFS_VERSION      = "0.0.1"
-	KFS_STORAGE_PATH = "/home/kyle/.kfs/storage"
-	KFS_STAGING_PATH = "/home/kyle/.kfs/staging"
-	KFS_DB_PATH      = "/home/kyle/.kfs/db/db.sqlite3"
+	KFS_VERSION    = "0.0.1"
+	KFS_DB_PATH    = "/home/kyle/.kfs/db/db.sqlite3"
+	KFS_REDUNDANCY = 2
 )
 
 var (
 	mutex = &sync.Mutex{}
 )
 
-type DiskInfo struct {
-	Root           string
-	BytesAvailable uint64
-}
-
 func index(writer http.ResponseWriter, request *http.Request) {
 	fmt.Fprintf(writer, "KFS version: %s", KFS_VERSION)
 }
 
-func get_output_path(input_filename string) string {
+func get_output_path(staging_path string, input_filename string) string {
 	extension := filepath.Ext(input_filename)
 	output_id := uuid.Must(uuid.NewV4(), nil)
 	output_name := fmt.Sprintf("%s%s", output_id, extension)
-	output_path := filepath.Join(KFS_STAGING_PATH, output_name)
+	output_path := filepath.Join(staging_path, output_name)
 	return output_path
 }
 
@@ -84,11 +78,10 @@ func hash_file(filename string) (string, error) {
 	return hash, nil
 }
 
-func store_file(filename string, hash string) {
-	defer os.Remove(filename)
+func store_file(filename string, hash string, storage_path string) {
 	fmt.Printf("storing: %s\n", filename)
-	copy_file(filename, KFS_STORAGE_PATH)
-	fmt.Printf("stored: '%s' to '%s'\n", filename, KFS_STORAGE_PATH)
+	copy_file(filename, storage_path)
+	fmt.Printf("stored: '%s' to '%s'\n", filename, storage_path)
 
 	// TODO: communicate errors to error queue
 }
@@ -125,8 +118,15 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	client_hash := request.FormValue("hash")
 	size := header.Size
 	// TODO: request storage locations
-	staging, storage, err := db_alloc_storage(size)
-	fmt.Printf("staging: %s, storage: %s\n", staging, storage)
+	staging_path, storage_paths, err := db_alloc_storage(size)
+	if err != nil {
+		msg := fmt.Sprintf("could not store '%s': %v", header.Filename, err)
+		log.Println(msg)
+		writer.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(writer, "%s\n", msg)
+		return
+	}
+	fmt.Printf("staging: %s, storage: %s\n", staging_path, storage_paths)
 
 	client_path := request.FormValue("path")
 	fmt.Printf(
@@ -137,13 +137,8 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 		client_hash,
 	)
 	// TODO: lookup hash in database, if it already exists, then do nothing
-	if err != nil {
-		// file already exists
-		writer.WriteHeader(http.StatusOK)
-		fmt.Fprintf(writer, "OK\n")
-	}
 
-	output_path := get_output_path(header.Filename)
+	output_path := get_output_path(staging_path, header.Filename)
 	outf, err := os.Create(output_path)
 	if err != nil {
 		fmt.Printf("failed to create output file: %s\n", err)
@@ -169,10 +164,14 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	hash_filename := filepath.Join(KFS_STAGING_PATH, hash+".blake2b")
+	hash_filename := filepath.Join(staging_path, hash+".blake2b")
 	os.Rename(output_path, hash_filename)
-	go store_file(hash_filename, hash)
-	writer.WriteHeader(http.StatusOK)
+	for _, storage_path := range storage_paths {
+		fmt.Printf("path: %s\n", storage_path)
+		// TODO: when all store_file goroutines have finished, remove
+		//       the file from the staging directory
+		go store_file(hash_filename, hash, storage_path)
+	}
 	fmt.Fprintf(writer, "OK\n")
 }
 
@@ -197,41 +196,54 @@ func db_alloc_storage(size int64) (string, []string, error) {
 
 	db, err := sql.Open("sqlite3", KFS_DB_PATH)
 	if err != nil {
-		panic(err)
+		new_err := fmt.Errorf("could not open db: %v", err)
+		return "", []string{""}, new_err
 	}
 	query := `
-		select root, available
+		select root
 		from disks
 		where available > ?
-		order by 2 ASC;`
+	`
+	fmt.Printf("size: %d\n", size)
 	rows, err := db.Query(query, size)
 	if err != nil {
-		log.Fatal(err)
+		new_err := fmt.Errorf("could not query for available disk: %v", err)
+		return "", []string{""}, new_err
 	}
 	defer rows.Close()
 
-	var disk_info []DiskInfo
+	var disks []string
 
-	// TODO: return preferred staging directory and list of storage directories
 	for rows.Next() {
-		var (
-			root      string
-			available uint64
-		)
-		if err := rows.Scan(&root, &available); err != nil {
+		var root string
+		if err := rows.Scan(&root); err != nil {
 			log.Fatal(err)
 		}
-		disk_info = append(disk_info, DiskInfo{root, available})
-		break
+		disks = append(disks, root)
 	}
-	selected_disk := disk_info[rand.Int()%len(disk_info)]
-	log.Printf(
-		"root: %s bytes available: %d\n",
-		selected_disk.Root,
-		selected_disk.BytesAvailable,
-	)
+	if len(disks) < KFS_REDUNDANCY {
+		new_err := fmt.Errorf(
+			"not enough disks to meet redundancy requirements",
+		)
+		return "", []string{""}, new_err
+	}
+	rand.Shuffle(len(disks), func(i, j int) {
+		disks[i], disks[j] = disks[j], disks[i]
+	})
 
-	return "", []string{""}, nil
+	staging_dir := fmt.Sprintf("%s/.kfs/staging/", disks[0])
+	var storage_dirs []string
+	for i := 0; i < KFS_REDUNDANCY; i++ {
+		storage_dirs = append(
+			storage_dirs,
+			fmt.Sprintf("%s/.kfs/storage/", disks[i]),
+		)
+	}
+
+	// TODO: reduce disk space
+	// TODO: add file to 'files' table
+
+	return staging_dir, storage_dirs, nil
 }
 
 func db_init() {
@@ -240,7 +252,6 @@ func db_init() {
 		panic(err)
 	}
 
-	// TODO: create the actual schema here
 	schemas := []string{
 		`
 		CREATE TABLE IF NOT EXISTS files(
