@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+
+	"github.com/julienschmidt/httprouter"
 )
 
 const (
@@ -32,10 +34,10 @@ func main() {
 	fmt.Printf("version: %s\n", KFS_VERSION)
 	db_init()
 	defer db_close()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", index)
-	mux.HandleFunc("/upload", handle_upload)
-	mux.HandleFunc("/exists", handle_exists)
+	mux := httprouter.New()
+	mux.GET("/", index)
+	mux.POST("/upload", handle_upload)
+	mux.GET("/exists/:hash", handle_exists)
 	server := &http.Server{
 		Addr:    "0.0.0.0:8080",
 		Handler: mux,

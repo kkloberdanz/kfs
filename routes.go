@@ -24,21 +24,24 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/julienschmidt/httprouter"
 )
 
-func index(writer http.ResponseWriter, request *http.Request) {
+func index(writer http.ResponseWriter, request *http.Request, p httprouter.Params) {
 	fmt.Fprintf(writer, "KFS version: %s\n", KFS_VERSION)
 }
 
 /**
  * Check if the hash already exists on the server
  */
-func handle_exists(writer http.ResponseWriter, request *http.Request) {
-	client_hash := request.FormValue("hash")
-	if db_has_hash(client_hash) {
-		fmt.Fprintf(writer, "yes\n")
+func handle_exists(writer http.ResponseWriter, request *http.Request, p httprouter.Params) {
+	hash := p.ByName("hash")
+	fmt.Printf("****CLIENT HASH: '%s'\n", hash)
+	if db_has_hash(hash) {
+		fmt.Fprintf(writer, "yes")
 	} else {
-		fmt.Fprintf(writer, "no\n")
+		fmt.Fprintf(writer, "no")
 	}
 }
 
@@ -47,7 +50,7 @@ func handle_exists(writer http.ResponseWriter, request *http.Request) {
  * When finished receiving file, run background routine to persist it to
  * durable storage and add it to the disk array.
  */
-func handle_upload(writer http.ResponseWriter, request *http.Request) {
+func handle_upload(writer http.ResponseWriter, request *http.Request, p httprouter.Params) {
 	// you can upload file with:
 	// function kfs_upload()
 	// {
@@ -67,7 +70,7 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 			"file upload requires key of 'file'",
 			http.StatusBadRequest,
 		)
-		fmt.Fprintf(writer, "error\n")
+		fmt.Fprintf(writer, "error")
 		return
 	}
 	defer file.Close()
@@ -87,12 +90,12 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 		msg := fmt.Sprintf("could not store '%s': %v", header.Filename, err)
 		log.Println(msg)
 		writer.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(writer, "%s\n", msg)
+		fmt.Fprintf(writer, "%s", msg)
 		return
 	}
 	if skip {
 		log.Printf("skipping, already have hash: %s", client_hash)
-		fmt.Fprintf(writer, "ok\n")
+		fmt.Fprintf(writer, "ok")
 		return
 	}
 	fmt.Printf("staging: %s, storage: %s\n", staging_path, storage_paths)
@@ -128,5 +131,5 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	os.Rename(output_path, hash_filename)
 	outf.Close()
 	go archive_file(staging_path, storage_paths, hash_filename, hash)
-	fmt.Fprintf(writer, "ok\n")
+	fmt.Fprintf(writer, "ok")
 }
