@@ -75,21 +75,21 @@ func hash_file(filename string) (string, error) {
 
 	output_str := string(output)
 	hash := strings.Fields(output_str)[0]
-	fmt.Printf("hash = %s\n", hash)
+	log.Printf("hash = %s\n", hash)
 	return hash, nil
 }
 
 func store_file(filename string, hash string, storage_path string) {
-	fmt.Printf("storing: %s\n", filename)
+	log.Printf("storing: %s\n", filename)
 	copy_file(filename, storage_path)
-	fmt.Printf("stored: '%s' to '%s'\n", filename, storage_path)
+	log.Printf("stored: '%s' to '%s'\n", filename, storage_path)
 	// TODO: communicate errors to error queue
 }
 
 func archive_file(staging_path string, storage_paths []string, hash_filename string, hash string) {
 	var wg sync.WaitGroup
 	for _, storage_path := range storage_paths {
-		fmt.Printf("path: %s\n", storage_path)
+		log.Printf("path: %s\n", storage_path)
 		wg.Add(1)
 		go func(storage_path string, hash_filename string, hash string) {
 			defer wg.Done()
