@@ -73,7 +73,7 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	defer file.Close()
 	client_hash := request.FormValue("hash")
 	size := header.Size
-	skip, staging_path, storage_paths, err := AllocStorage(client_hash, size)
+	skip, staging_path, storage_paths, err := db_alloc_storage(client_hash, size)
 	if err != nil {
 		msg := fmt.Sprintf("could not store '%s': %v", header.Filename, err)
 		log.Println(msg)

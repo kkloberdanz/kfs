@@ -68,7 +68,7 @@ func db_has_hash(hash string) bool {
 	return n_records > 0
 }
 
-func AllocStorage(hash string, size int64) (bool, string, []string, error) {
+func db_alloc_storage(hash string, size int64) (bool, string, []string, error) {
 	// TODO: store file metadata in table
 
 	/*
