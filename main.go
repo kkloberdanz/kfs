@@ -79,30 +79,27 @@ func hash_file(filename string) (string, error) {
 	return hash, nil
 }
 
-func store_file(filename string, hash string, storage_path string, done chan struct{}) {
+func store_file(filename string, hash string, storage_path string) {
 	fmt.Printf("storing: %s\n", filename)
 	copy_file(filename, storage_path)
 	fmt.Printf("stored: '%s' to '%s'\n", filename, storage_path)
-
-	done <- struct{}{}
 	// TODO: communicate errors to error queue
 }
 
 func archive_file(staging_path string, storage_paths []string, hash_filename string, hash string) {
-	var ready []chan struct{}
+	var wg sync.WaitGroup
 	for _, storage_path := range storage_paths {
 		fmt.Printf("path: %s\n", storage_path)
 		// TODO: when all store_file goroutines have finished, remove
 		//       the file from the staging directory
-		ch := make(chan struct{})
-		ready = append(ready, ch)
-		go store_file(hash_filename, hash, storage_path, ch)
+		wg.Add(1)
+		go func(storage_path string, hash_filename string, hash string) {
+			defer wg.Done()
+			store_file(hash_filename, hash, storage_path)
+		}(storage_path, hash_filename, hash)
 	}
 
-	for _, done := range ready {
-		// wait for all channels to finish
-		<-done
-	}
+	wg.Wait()
 
 	// TODO: check error
 	os.Remove(hash_filename)
