@@ -72,8 +72,17 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	}
 	defer file.Close()
 	client_hash := request.FormValue("hash")
+	client_path := request.FormValue("path")
 	size := header.Size
-	skip, staging_path, storage_paths, err := db_alloc_storage(client_hash, size)
+	fmt.Printf(
+		"got file '%s/%s', size: %d, blake2b hash: %s\n",
+		client_path,
+		header.Filename,
+		size,
+		client_hash,
+	)
+
+	skip, staging_path, storage_paths, err := db_alloc_storage(client_hash, size, client_path)
 	if err != nil {
 		msg := fmt.Sprintf("could not store '%s': %v", header.Filename, err)
 		log.Println(msg)
@@ -83,24 +92,16 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	}
 	if skip {
 		log.Printf("skipping, already have hash: %s", client_hash)
-		fmt.Fprintf(writer, "OK\n")
+		fmt.Fprintf(writer, "ok\n")
 		return
 	}
 	fmt.Printf("staging: %s, storage: %s\n", staging_path, storage_paths)
 
-	client_path := request.FormValue("path")
-	fmt.Printf(
-		"got file '%s/%s', size: %d, blake2b hash: %s\n",
-		client_path,
-		header.Filename,
-		size,
-		client_hash,
-	)
-
 	output_path := get_output_path(staging_path, header.Filename)
 	outf, err := os.Create(output_path)
 	if err != nil {
-		fmt.Printf("failed to create output file: %s\n", err)
+		writer.WriteHeader(http.StatusInternalServerError)
+		log.Printf("failed to create output file: %s\n", err)
 		return
 	}
 	defer outf.Close()
@@ -125,6 +126,7 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 
 	hash_filename := filepath.Join(staging_path, hash+".blake2b")
 	os.Rename(output_path, hash_filename)
+	outf.Close()
 	go archive_file(staging_path, storage_paths, hash_filename, hash)
-	fmt.Fprintf(writer, "OK\n")
+	fmt.Fprintf(writer, "ok\n")
 }

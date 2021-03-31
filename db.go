@@ -43,13 +43,13 @@ func db_reduce_space(root string, size int64) {
 	}
 }
 
-func db_add_file_records(hash string, storage_dirs []string) {
+func db_add_file_records(hash string, storage_dirs []string, path string) {
 	stmt := `
-		insert into files(hash, hash_algo, storage_root)
-		values(?, 'blake2b', ?)
+		insert into files(hash, hash_algo, storage_root, path)
+		values(?, 'blake2b', ?, ?)
 	`
 	for _, storage_dir := range storage_dirs {
-		_, err := db.Exec(stmt, hash, storage_dir)
+		_, err := db.Exec(stmt, hash, storage_dir, path)
 		if err != nil {
 			panic(fmt.Errorf("could not add new file record: %v", err))
 		}
@@ -68,7 +68,7 @@ func db_has_hash(hash string) bool {
 	return n_records > 0
 }
 
-func db_alloc_storage(hash string, size int64) (bool, string, []string, error) {
+func db_alloc_storage(hash string, size int64, path string) (bool, string, []string, error) {
 	// TODO: store file metadata in table
 
 	/*
@@ -131,7 +131,7 @@ func db_alloc_storage(hash string, size int64) (bool, string, []string, error) {
 	}
 
 	// add file to 'files' table
-	db_add_file_records(hash, storage_dirs)
+	db_add_file_records(hash, storage_dirs, path)
 
 	staging_path := fmt.Sprintf("%s/.kfs/staging/", staging_dir)
 	var storage_paths []string
