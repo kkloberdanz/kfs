@@ -38,8 +38,10 @@ func index(writer http.ResponseWriter, request *http.Request, p httprouter.Param
 func handle_exists(writer http.ResponseWriter, request *http.Request, p httprouter.Params) {
 	hash := p.ByName("hash")
 	if db_has_hash(hash) {
+		log.Printf("hash: %s exists", hash)
 		fmt.Fprintf(writer, "yes")
 	} else {
+		log.Printf("hash: %s does not exist", hash)
 		fmt.Fprintf(writer, "no")
 	}
 }
@@ -60,7 +62,7 @@ func handle_upload(writer http.ResponseWriter, request *http.Request, p httprout
 	//         -F "path=`pwd`" \
 	//         localhost:8080/upload
 	// }
-	fmt.Println("handling upload")
+	log.Println("handling upload")
 
 	file, header, err := request.FormFile("file")
 	if err != nil {
