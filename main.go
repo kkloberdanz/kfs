@@ -79,12 +79,33 @@ func hash_file(filename string) (string, error) {
 	return hash, nil
 }
 
-func store_file(filename string, hash string, storage_path string) {
+func store_file(filename string, hash string, storage_path string, done chan struct{}) {
 	fmt.Printf("storing: %s\n", filename)
 	copy_file(filename, storage_path)
 	fmt.Printf("stored: '%s' to '%s'\n", filename, storage_path)
 
+	done <- struct{}{}
 	// TODO: communicate errors to error queue
+}
+
+func archive_file(staging_path string, storage_paths []string, hash_filename string, hash string) {
+	var ready []chan struct{}
+	for _, storage_path := range storage_paths {
+		fmt.Printf("path: %s\n", storage_path)
+		// TODO: when all store_file goroutines have finished, remove
+		//       the file from the staging directory
+		ch := make(chan struct{})
+		ready = append(ready, ch)
+		go store_file(hash_filename, hash, storage_path, ch)
+	}
+
+	for _, done := range ready {
+		// wait for all channels to finish
+		<-done
+	}
+
+	// TODO: check error
+	os.Remove(hash_filename)
 }
 
 /**
@@ -167,12 +188,7 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 
 	hash_filename := filepath.Join(staging_path, hash+".blake2b")
 	os.Rename(output_path, hash_filename)
-	for _, storage_path := range storage_paths {
-		fmt.Printf("path: %s\n", storage_path)
-		// TODO: when all store_file goroutines have finished, remove
-		//       the file from the staging directory
-		go store_file(hash_filename, hash, storage_path)
-	}
+	go archive_file(staging_path, storage_paths, hash_filename, hash)
 	fmt.Fprintf(writer, "OK\n")
 }
 
