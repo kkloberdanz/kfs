@@ -43,6 +43,7 @@ const (
 
 var (
 	mutex = &sync.Mutex{}
+	db    *sql.DB
 )
 
 func index(writer http.ResponseWriter, request *http.Request) {
@@ -118,7 +119,7 @@ func handle_upload(writer http.ResponseWriter, request *http.Request) {
 	client_hash := request.FormValue("hash")
 	size := header.Size
 	// TODO: request storage locations
-	staging_path, storage_paths, err := db_alloc_storage(size)
+	staging_path, storage_paths, err := db_alloc_storage(client_hash, size)
 	if err != nil {
 		msg := fmt.Sprintf("could not store '%s': %v", header.Filename, err)
 		log.Println(msg)
@@ -185,7 +186,30 @@ func get_disk_space(path string) uint64 {
 	return available_space
 }
 
-func db_alloc_storage(size int64) (string, []string, error) {
+func db_reduce_space(root string, size int64) {
+	stmt := `update disks set available = available - ? where root = ?`
+	_, err := db.Exec(stmt, size, root)
+	if err != nil {
+		panic(fmt.Errorf("could not update available storage record: %v", err))
+	}
+}
+
+func db_add_file_records(hash string, storage_dirs []string) {
+	stmt := `
+		insert into files(hash, hash_algo, storage_root)
+		values(?, 'blake2b', ?)
+	`
+	for _, storage_dir := range storage_dirs {
+		_, err := db.Exec(stmt, hash, storage_dir)
+		if err != nil {
+			panic(fmt.Errorf("could not add new file record: %v", err))
+		}
+	}
+}
+
+func db_alloc_storage(hash string, size int64) (string, []string, error) {
+	// TODO: if hash already exists, then don't do anything
+
 	/*
 	 * TODO: add a record to the sqlite db with the following metadata
 	 * |storage root|uuid|path|filename|hash|hash algo (blake2b)|extension
@@ -194,18 +218,13 @@ func db_alloc_storage(size int64) (string, []string, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	db, err := sql.Open("sqlite3", KFS_DB_PATH)
-	if err != nil {
-		new_err := fmt.Errorf("could not open db: %v", err)
-		return "", []string{""}, new_err
-	}
 	query := `
 		select root
 		from disks
 		where available > ?
 	`
 	fmt.Printf("size: %d\n", size)
-	rows, err := db.Query(query, size)
+	rows, err := db.Query(query, 2*size)
 	if err != nil {
 		new_err := fmt.Errorf("could not query for available disk: %v", err)
 		return "", []string{""}, new_err
@@ -231,27 +250,32 @@ func db_alloc_storage(size int64) (string, []string, error) {
 		disks[i], disks[j] = disks[j], disks[i]
 	})
 
-	staging_dir := fmt.Sprintf("%s/.kfs/staging/", disks[0])
+	staging_dir := disks[0]
 	var storage_dirs []string
 	for i := 0; i < KFS_REDUNDANCY; i++ {
-		storage_dirs = append(
-			storage_dirs,
-			fmt.Sprintf("%s/.kfs/storage/", disks[i]),
-		)
+		storage_dirs = append(storage_dirs, disks[i])
 	}
 
-	// TODO: reduce disk space
-	// TODO: add file to 'files' table
+	// reduce disk space
+	db_reduce_space(staging_dir, size)
+	for _, storage := range storage_dirs {
+		db_reduce_space(storage, size)
+	}
 
-	return staging_dir, storage_dirs, nil
+	// add file to 'files' table
+	db_add_file_records(hash, storage_dirs)
+
+	staging_path := fmt.Sprintf("%s/.kfs/staging/", staging_dir)
+	var storage_paths []string
+	for _, dir := range storage_dirs {
+		full_path := fmt.Sprintf("%s/.kfs/storage/", dir)
+		storage_paths = append(storage_paths, full_path)
+	}
+	return staging_path, storage_paths, nil
 }
 
 func db_init() {
-	db, err := sql.Open("sqlite3", KFS_DB_PATH)
-	if err != nil {
-		panic(err)
-	}
-
+	var err error
 	schemas := []string{
 		`
 		CREATE TABLE IF NOT EXISTS files(
@@ -305,6 +329,12 @@ func db_init() {
 func main() {
 	fmt.Println("KFS -- Kyle's File Storage")
 	fmt.Printf("version: %s\n", KFS_VERSION)
+	var err error
+	db, err = sql.Open("sqlite3", KFS_DB_PATH)
+	if err != nil {
+		panic(fmt.Errorf("failed to open database file: %v", err))
+	}
+	defer db.Close()
 	db_init()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", index)
